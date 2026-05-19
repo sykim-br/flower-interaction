@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>손으로 피우는 꽃</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0a0a0a;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      font-family: 'Noto Sans KR', sans-serif;
+      color: #fff;
+      overflow: hidden;
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      letter-spacing: 0.15em;
+      color: #f0c0d0;
+      margin-bottom: 20px;
+      opacity: 0.85;
+      text-shadow: 0 0 20px #f090b0;
+    }
+
+    #stage {
+      position: relative;
+      width: 640px;
+      height: 360px;
+      border-radius: 18px;
+      overflow: hidden;
+      box-shadow: 0 0 60px #f090b044;
+    }
+
+    #flowerVideo {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    /* 웹캠 미리보기: 우측 하단에 작게 */
+    #camWrap {
+      position: absolute;
+      bottom: 12px;
+      right: 12px;
+      width: 140px;
+      height: 105px;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 2px solid rgba(255,255,255,0.2);
+      background: #000;
+    }
+
+    #webcam {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1); /* 거울 모드 */
+    }
+
+    /* 손 랜드마크 캔버스 (웹캠 위에 겹침) */
+    #landmarkCanvas {
+      position: absolute;
+      bottom: 12px;
+      right: 12px;
+      width: 140px;
+      height: 105px;
+      border-radius: 10px;
+      pointer-events: none;
+    }
+
+    /* 상태 표시 */
+    #statusBar {
+      margin-top: 18px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 0.95rem;
+    }
+
+    #gestureIcon {
+      font-size: 2rem;
+      transition: transform 0.3s;
+    }
+
+    #gestureText {
+      font-size: 1rem;
+      color: #f0c0d0;
+      min-width: 180px;
+      text-align: center;
+    }
+
+    /* 꽃 피고 지는 오버레이 (시각적 효과) */
+    #overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      border-radius: 18px;
+      transition: box-shadow 0.5s;
+    }
+
+    .bloom-glow {
+      box-shadow: inset 0 0 60px 20px rgba(255, 180, 100, 0.25);
+    }
+
+    .wilt-glow {
+      box-shadow: inset 0 0 60px 20px rgba(60, 0, 80, 0.35);
+    }
+
+    /* 로딩 */
+    #loadingMsg {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,0.75);
+      border-radius: 18px;
+      font-size: 0.9rem;
+      color: #ccc;
+      gap: 10px;
+      z-index: 10;
+    }
+
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid #555;
+      border-top-color: #f090b0;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* 꽃 흔들리기 애니메이션 */
+    @keyframes sway {
+      0%   { transform: rotate(0deg) translateX(0px); }
+      20%  { transform: rotate(-4deg) translateX(-18px); }
+      40%  { transform: rotate(4deg) translateX(18px); }
+      60%  { transform: rotate(-4deg) translateX(-18px); }
+      80%  { transform: rotate(4deg) translateX(18px); }
+      100% { transform: rotate(0deg) translateX(0px); }
+    }
+
+    #flowerVideo.swaying {
+      animation: sway 0.55s ease-in-out;
+    }
+
+    /* 힌트 */
+    #hint {
+      margin-top: 10px;
+      font-size: 0.8rem;
+      color: #888;
+      letter-spacing: 0.05em;
+    }
+  </style>
+</head>
+<body>
+  <h1>🌸 손으로 피우는 꽃 🌸</h1>
+
+  <div id="stage">
+    <video id="flowerVideo" muted playsinline preload="auto"></video>
+    <div id="overlay"></div>
+    <div id="camWrap">
+      <video id="webcam" autoplay muted playsinline></video>
+    </div>
+    <canvas id="landmarkCanvas"></canvas>
+    <div id="loadingMsg">
+      <div class="spinner"></div>
+      <span>손 인식 모델 불러오는 중...</span>
+    </div>
+  </div>
+
+  <div id="statusBar">
+    <span id="gestureIcon">✋</span>
+    <span id="gestureText">웹캠 권한을 허용해주세요</span>
+  </div>
+  <p id="hint">손바닥 펼치기 = 꽃이 핀다 &nbsp;|&nbsp; 주먹 쥐기 = 꽃이 진다 &nbsp;|&nbsp; 손 흔들기 = 꽃이 흔들린다</p>
+
+  <!-- MediaPipe Hands (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+  <script>
+    const flowerVideo = document.getElementById('flowerVideo');
+    const webcamEl   = document.getElementById('webcam');
+    const canvas     = document.getElementById('landmarkCanvas');
+    const ctx        = canvas.getContext('2d');
+    const overlay    = document.getElementById('overlay');
+    const gestureIcon = document.getElementById('gestureIcon');
+    const gestureText = document.getElementById('gestureText');
+    const loadingMsg  = document.getElementById('loadingMsg');
+
+    // ── 영상 설정 ──────────────────────────────────────────────
+    flowerVideo.src = '꽃영상_2.mp4';
+    flowerVideo.loop = false;
+
+    // 영상 구간 정의 (실제 영상 길이에 맞게 자동 조정됨)
+    let videoDuration = 0;
+    flowerVideo.addEventListener('loadedmetadata', () => {
+      videoDuration = flowerVideo.duration;
+      // 초기: 영상 중간 정도 (꽃봉오리 상태)
+      flowerVideo.currentTime = 0;
+      flowerVideo.pause();
+    });
+
+    // ── 제스처 → 영상 제어 ─────────────────────────────────────
+    let currentGesture = null;   // 'open' | 'fist' | null
+    let targetTime = 0;
+    let animFrame = null;
+    const SPEED = 0.03; // 초당 진행 속도 배율 (값이 클수록 빨리 재생)
+
+    function animateVideo() {
+      if (!videoDuration) { animFrame = requestAnimationFrame(animateVideo); return; }
+
+      const t = flowerVideo.currentTime;
+
+      if (currentGesture === 'open') {
+        // 꽃이 피는 방향: 끝으로
+        if (t < videoDuration - 0.05) {
+          flowerVideo.currentTime = Math.min(t + SPEED, videoDuration);
+        }
+      } else if (currentGesture === 'fist') {
+        // 꽃이 지는 방향: 처음으로
+        if (t > 0.05) {
+          flowerVideo.currentTime = Math.max(t - SPEED, 0);
+        }
+      }
+
+      animFrame = requestAnimationFrame(animateVideo);
+    }
+
+    animFrame = requestAnimationFrame(animateVideo);
+
+    function setGesture(g) {
+      if (g === currentGesture) return;
+      currentGesture = g;
+
+      if (g === 'open') {
+        gestureIcon.textContent = '🖐';
+        gestureText.textContent = '꽃이 피어나고 있어요 🌸';
+        overlay.className = 'bloom-glow';
+      } else if (g === 'fist') {
+        gestureIcon.textContent = '✊';
+        gestureText.textContent = '꽃이 지고 있어요 🍂';
+        overlay.className = 'wilt-glow';
+      } else {
+        gestureIcon.textContent = '✋';
+        gestureText.textContent = '손을 보여주세요';
+        overlay.className = '';
+      }
+    }
+
+    // ── 웨이브 감지 ────────────────────────────────────────────
+    // 손목(landmark 0) x 좌표 이동 방향이 짧은 시간 안에 여러 번 바뀌면 wave
+    const waveHistory = [];       // { x, t } 기록
+    const WAVE_WINDOW   = 1200;   // ms — 이 시간 안에
+    const WAVE_REVERSALS = 3;     // 방향 전환 횟수 이상이면 wave
+    const WAVE_MIN_DELTA = 0.04;  // 정규화 좌표 기준 최소 이동 폭
+    let waveCooldown = 0;         // 연속 트리거 방지
+
+    function detectWave(wristX) {
+      const now = Date.now();
+      waveHistory.push({ x: wristX, t: now });
+
+      // 오래된 기록 제거
+      while (waveHistory.length > 0 && now - waveHistory[0].t > WAVE_WINDOW) {
+        waveHistory.shift();
+      }
+
+      if (waveHistory.length < 6) return false;
+
+      // 방향 전환 횟수 계산
+      let reversals = 0;
+      let prevDir = 0;
+      for (let i = 1; i < waveHistory.length; i++) {
+        const delta = waveHistory[i].x - waveHistory[i - 1].x;
+        if (Math.abs(delta) < WAVE_MIN_DELTA / waveHistory.length) continue;
+        const dir = delta > 0 ? 1 : -1;
+        if (prevDir !== 0 && dir !== prevDir) reversals++;
+        prevDir = dir;
+      }
+
+      if (reversals >= WAVE_REVERSALS && now > waveCooldown) {
+        waveCooldown = now + 800; // 0.8초 쿨다운
+        return true;
+      }
+      return false;
+    }
+
+    function triggerSway() {
+      flowerVideo.classList.remove('swaying');
+      void flowerVideo.offsetWidth; // reflow로 애니메이션 리셋
+      flowerVideo.classList.add('swaying');
+      flowerVideo.addEventListener('animationend', () => {
+        flowerVideo.classList.remove('swaying');
+      }, { once: true });
+
+      gestureIcon.textContent = '👋';
+      gestureText.textContent = '꽃이 흔들려요 🌸';
+      overlay.className = '';
+    }
+
+    // ── 제스처 판별 ────────────────────────────────────────────
+    function classifyHand(landmarks) {
+      const fingerTips = [8, 12, 16, 20];
+      const fingerPips = [6, 10, 14, 18];
+
+      let openCount = 0;
+      for (let i = 0; i < 4; i++) {
+        if (landmarks[fingerTips[i]].y < landmarks[fingerPips[i]].y) {
+          openCount++;
+        }
+      }
+
+      if (openCount >= 3) return 'open';
+      if (openCount <= 1) return 'fist';
+      return null;
+    }
+
+    // ── MediaPipe Hands 초기화 ─────────────────────────────────
+    const hands = new Hands({
+      locateFile: (file) =>
+        `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+    });
+
+    hands.setOptions({
+      maxNumHands: 1,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.7,
+      minTrackingConfidence: 0.6,
+    });
+
+    hands.onResults((results) => {
+      // 캔버스에 랜드마크 그리기
+      ctx.save();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.translate(canvas.width, 0);
+      ctx.scale(-1, 1); // 거울 모드 맞춤
+
+      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+        for (const lm of results.multiHandLandmarks) {
+          drawConnectors(ctx, lm, HAND_CONNECTIONS, { color: '#ff99cc', lineWidth: 1.5 });
+          drawLandmarks(ctx, lm, { color: '#ffffff', lineWidth: 1, radius: 2 });
+        }
+        const gesture = classifyHand(results.multiHandLandmarks[0]);
+        setGesture(gesture);
+      } else {
+        setGesture(null);
+      }
+      ctx.restore();
+    });
+
+    // ── 웹캠 시작 ─────────────────────────────────────────────
+    async function startCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 320, height: 240, facingMode: 'user' },
+          audio: false
+        });
+        webcamEl.srcObject = stream;
+
+        webcamEl.onloadedmetadata = () => {
+          canvas.width  = webcamEl.offsetWidth  || 140;
+          canvas.height = webcamEl.offsetHeight || 105;
+        };
+
+        const camera = new Camera(webcamEl, {
+          onFrame: async () => {
+            await hands.send({ image: webcamEl });
+          },
+          width: 320,
+          height: 240,
+        });
+
+        await camera.start();
+
+        // 모델 로드 완료 — 로딩 메시지 숨기기
+        hands.onResults((results) => {
+          loadingMsg.style.display = 'none';
+
+          ctx.save();
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.translate(canvas.width, 0);
+          ctx.scale(-1, 1);
+
+          if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+            for (const lm of results.multiHandLandmarks) {
+              drawConnectors(ctx, lm, HAND_CONNECTIONS, { color: '#ff99cc', lineWidth: 1.5 });
+              drawLandmarks(ctx, lm, { color: '#ffffff', lineWidth: 1, radius: 2 });
+            }
+            const lm = results.multiHandLandmarks[0];
+            if (detectWave(lm[0].x)) {
+              triggerSway();
+            } else {
+              setGesture(classifyHand(lm));
+            }
+          } else {
+            waveHistory.length = 0;
+            setGesture(null);
+          }
+          ctx.restore();
+        });
+
+        gestureText.textContent = '손을 카메라에 보여주세요';
+
+      } catch (err) {
+        loadingMsg.innerHTML = `<span style="color:#f88">웹캠 접근 실패: ${err.message}</span>`;
+      }
+    }
+
+    startCamera();
+  </script>
+</body>
+</html>
